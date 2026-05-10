@@ -33,6 +33,39 @@ logger = get_logger("default")
 class GraphSetup:
     """Handles the setup and configuration of the agent graph."""
 
+    ANALYST_NAME_MAP = {
+        "market": "market",
+        "fundamentals": "fundamentals",
+        "fundamental": "fundamentals",
+        "news": "news",
+        "social": "social",
+        "sentiment": "social",
+        "\u5e02\u573a\u5206\u6790\u5e08": "market",
+        "\u5e02\u5834\u5206\u6790\u5e2b": "market",
+        "\u57fa\u672c\u9762\u5206\u6790\u5e08": "fundamentals",
+        "\u57fa\u672c\u9762\u5206\u6790\u5e2b": "fundamentals",
+        "\u65b0\u95fb\u5206\u6790\u5e08": "news",
+        "\u65b0\u805e\u5206\u6790\u5e2b": "news",
+        "\u793e\u5a92\u5206\u6790\u5e08": "social",
+        "\u793e\u5a92\u5206\u6790\u5e2b": "social",
+        "\u793e\u4ea4\u5a92\u4f53\u5206\u6790\u5e08": "social",
+        "\u793e\u4ea4\u5a92\u9ad4\u5206\u6790\u5e2b": "social",
+        "\u60c5\u7eea\u5206\u6790": "social",
+        "\u60c5\u7dd2\u5206\u6790": "social",
+    }
+
+    def _normalize_selected_analysts(self, selected_analysts):
+        normalized = []
+        for analyst in selected_analysts or []:
+            key = str(analyst).strip()
+            key = key.split(" ", 1)[-1] if " " in key else key
+            mapped = self.ANALYST_NAME_MAP.get(key) or self.ANALYST_NAME_MAP.get(key.lower())
+            if mapped and mapped not in normalized:
+                normalized.append(mapped)
+            elif not mapped:
+                logger.warning(f"Unknown analyst type ignored: {analyst!r}")
+        return normalized
+
     def __init__(
         self,
         quick_thinking_llm: ChatOpenAI,
@@ -74,6 +107,8 @@ class GraphSetup:
                 - "news": News analyst
                 - "fundamentals": Fundamentals analyst
         """
+        selected_analysts = self._normalize_selected_analysts(selected_analysts)
+
         if len(selected_analysts) == 0:
             raise ValueError("Trading Agents Graph Setup Error: no analysts selected!")
 
