@@ -546,7 +546,11 @@ class StockDataPreparer:
             historical_data = get_china_stock_data_unified(stock_code, extended_start_date_str, end_date_str)
 
             if historical_data and "❌" not in historical_data and "获取失败" not in historical_data:
-                data_indicators = ["开盘价", "收盘价", "最高价", "最低价", "成交量"]
+                data_indicators = [
+                    "开盘价", "收盘价", "最高价", "最低价", "成交量",
+                    "open", "close", "high", "low", "volume",
+                    "日期", "date", "时间", "time",
+                ]
                 has_valid_data = (
                     len(historical_data) > 50 and
                     any(indicator in historical_data for indicator in data_indicators)

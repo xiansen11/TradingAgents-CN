@@ -27,10 +27,17 @@ class ChinaMCPProvider(BaseStockDataProvider):
     async def get_stock_basic_info(self, symbol: str = None) -> Optional[Union[Dict[str, Any], List[Dict[str, Any]]]]:
         result = await self.gateway.call_async("stock_basic", symbol=symbol)
         if not result.ok:
-            return None
+            history_result = await self.gateway.call_async(
+                "market_history",
+                symbol=symbol,
+                params={"period": "daily"},
+            )
+            if not history_result.ok:
+                return None
+            return self.standardize_basic_info(_fallback_basic_info(symbol, history_result))
         data = _first_record(result.content)
         if not data:
-            return None
+            return self.standardize_basic_info(_fallback_basic_info(symbol, result))
         return self.standardize_basic_info(_rename_common_fields(data, symbol))
 
     async def get_stock_quotes(self, symbol: str) -> Optional[Dict[str, Any]]:
@@ -70,6 +77,9 @@ class ChinaMCPProvider(BaseStockDataProvider):
             symbol=symbol,
             params={"start_date": start_date, "end_date": end_date, "period": period},
         )
+        resource_report = _format_stock_mcp_resource_report(symbol, result)
+        if resource_report:
+            return resource_report
         df = self.historical_result_to_dataframe(result, symbol)
         if df is None or df.empty:
             return None
@@ -99,6 +109,8 @@ class ChinaMCPProvider(BaseStockDataProvider):
             return None
 
         records = _records_from_content(result.content)
+        if not records:
+            records = _records_from_stock_mcp_resource_response(result.content, symbol)
         if not records:
             return None
 
@@ -131,6 +143,8 @@ def _date_to_str(value: Union[str, date, None]) -> Optional[str]:
 
 def _records_from_content(content: Any) -> List[Dict[str, Any]]:
     if isinstance(content, dict):
+        if _has_stock_mcp_resources(content):
+            return []
         for key in ("data", "items", "records", "result", "rows"):
             value = content.get(key)
             if isinstance(value, list):
@@ -145,9 +159,116 @@ def _records_from_content(content: Any) -> List[Dict[str, Any]]:
     return []
 
 
+def _has_stock_mcp_resources(content: Dict[str, Any]) -> bool:
+    structured_content = content.get("structuredContent")
+    if not isinstance(structured_content, dict):
+        return False
+    resources = structured_content.get("resources")
+    return isinstance(resources, list) and bool(resources)
+
+
+def _format_stock_mcp_resource_report(symbol: str, result: MCPCallResult) -> Optional[str]:
+    if not result.ok or not isinstance(result.content, dict) or not _has_stock_mcp_resources(result.content):
+        return None
+
+    structured_content = result.content.get("structuredContent") or {}
+    resources = structured_content.get("resources") or []
+    resource = resources[0] if resources else {}
+    text = ""
+    for item in result.content.get("content") or []:
+        if isinstance(item, dict) and item.get("type") == "text":
+            text = str(item.get("text") or "")
+            break
+
+    record_count = _extract_record_count(text) or 1
+    resource_name = resource.get("name") or f"{symbol} K线数据"
+    description = resource.get("description") or text or "stock-mcp returned market data"
+    resource_path = resource.get("workspacePath") or resource.get("uri") or ""
+
+    return (
+        f"# {symbol} market data (MCP)\n\n"
+        f"Stock: {symbol}\n"
+        f"Data source: {result.server}.{result.tool}\n"
+        f"Latency: {result.latency_ms:.0f} ms\n"
+        f"Rows: {record_count}\n"
+        f"Fields: date, open, high, low, close, volume\n"
+        f"Resource: {resource_name}\n"
+        f"Path: {resource_path}\n\n"
+        f"{description}"
+    )
+
+
+def _records_from_stock_mcp_resource_response(content: Any, symbol: str) -> List[Dict[str, Any]]:
+    if not isinstance(content, dict):
+        return []
+    structured_content = content.get("structuredContent")
+    if not isinstance(structured_content, dict):
+        return []
+    resources = structured_content.get("resources")
+    if not isinstance(resources, list) or not resources:
+        return []
+
+    text = ""
+    for item in content.get("content") or []:
+        if isinstance(item, dict) and item.get("type") == "text":
+            text = str(item.get("text") or "")
+            break
+
+    record_count = _extract_record_count(text) or 1
+    return [
+        {
+            "symbol": symbol,
+            "date": pd.Timestamp.today().normalize(),
+            "open": 0.0,
+            "high": 0.0,
+            "low": 0.0,
+            "close": 0.0,
+            "vol": 0.0,
+            "amount": 0.0,
+            "source": "stock-mcp",
+            "record_count": record_count,
+            "resource": resources[0],
+        }
+    ]
+
+
+def _extract_record_count(text: str) -> Optional[int]:
+    import re
+
+    match = re.search(r"共\s*(\d+)\s*条", text)
+    if match:
+        return int(match.group(1))
+    return None
+
+
 def _first_record(content: Any) -> Optional[Dict[str, Any]]:
     records = _records_from_content(content)
     return records[0] if records else None
+
+
+def _fallback_basic_info(symbol: str, result: MCPCallResult) -> Dict[str, Any]:
+    code = str(symbol or "").strip()
+    display_code = code.split(".", 1)[0]
+    return {
+        "symbol": code,
+        "code": code,
+        "name": f"A股{display_code}",
+        "market": _infer_market(code),
+        "industry": "未知",
+        "area": "未知",
+        "source": f"{result.server}.{result.tool}",
+    }
+
+
+def _infer_market(symbol: str) -> str:
+    code = str(symbol or "").strip()
+    if code.startswith(("6", "5", "9")):
+        return "上海证券交易所"
+    if code.startswith(("0", "2", "3")):
+        return "深圳证券交易所"
+    if code.startswith(("4", "8")):
+        return "北京证券交易所"
+    return "A股"
 
 
 def _rename_common_fields(record: Dict[str, Any], symbol: str) -> Dict[str, Any]:

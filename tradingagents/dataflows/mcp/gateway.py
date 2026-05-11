@@ -33,7 +33,15 @@ class MCPCallResult:
 
     @property
     def ok(self) -> bool:
-        return self.error is None and self.content not in (None, "", [], {})
+        if self.error is not None or self.content in (None, "", [], {}):
+            return False
+        if isinstance(self.content, dict):
+            if self.content.get("isError") is True:
+                return False
+            structured_content = self.content.get("structuredContent")
+            if isinstance(structured_content, dict) and structured_content.get("error"):
+                return False
+        return True
 
 
 @dataclass(frozen=True)
@@ -61,6 +69,13 @@ class MCPDataGateway:
         "market_history": [
             MCPToolRoute(
                 "china_stock_mcp",
+                "get_kline_data",
+                {"symbol": "symbol", "period": "period"},
+                {"period": "1y", "interval": "1d"},
+                "stock_mcp",
+            ),
+            MCPToolRoute(
+                "china_stock_mcp",
                 "get_hist_data",
                 {"symbol": "symbol", "start_date": "start_date", "end_date": "end_date", "period": "period"},
                 {"period": "daily"},
@@ -74,13 +89,17 @@ class MCPDataGateway:
             ),
         ],
         "market_realtime": [
+            MCPToolRoute("china_stock_mcp", "get_real_time_price", {"symbol": "symbol"}, transform="stock_mcp"),
             MCPToolRoute("china_stock_mcp", "get_realtime_data", {"symbol": "symbol"}, transform="china_stock"),
         ],
         "stock_basic": [
+            MCPToolRoute("china_stock_mcp", "get_asset_info", {"symbol": "symbol"}, transform="stock_mcp"),
             MCPToolRoute("china_stock_mcp", "get_stock_basic_info", {"symbol": "symbol"}, transform="china_stock"),
             MCPToolRoute("china_stock_mcp", "get_stock_a_code_name", {"symbol": "symbol"}, transform="china_stock"),
         ],
         "fundamentals": [
+            MCPToolRoute("china_stock_mcp", "get_financial_reports", {"symbol": "symbol"}, transform="stock_mcp"),
+            MCPToolRoute("china_stock_mcp", "get_valuation_metrics", {"symbol": "symbol"}, transform="stock_mcp"),
             MCPToolRoute(
                 "finance_mcp",
                 "company_performance",
@@ -96,12 +115,14 @@ class MCPDataGateway:
             MCPToolRoute("tushare_mcp", "sdk_call", {"symbol": "symbol", "api_name": "api_name"}, {"api_name": "fina_indicator"}),
         ],
         "news": [
+            MCPToolRoute("china_stock_mcp", "get_stock_news", {"symbol": "symbol", "limit": "limit"}, transform="stock_mcp"),
             MCPToolRoute("finance_mcp", "finance_news", {"symbol": "query", "limit": "limit"}, transform="finance"),
             MCPToolRoute("finance_mcp", "hot_news_7x24", {"limit": "limit"}),
             MCPToolRoute("china_stock_mcp", "get_news_data", {"symbol": "symbol", "limit": "limit"}, transform="china_stock"),
             MCPToolRoute("china_stock_mcp", "get_stock_research_report", {"symbol": "symbol", "limit": "limit"}, transform="china_stock"),
         ],
         "sentiment": [
+            MCPToolRoute("china_stock_mcp", "get_money_flow", {"symbol": "symbol"}, transform="stock_mcp"),
             MCPToolRoute("finance_mcp", "money_flow", {"symbol": "ts_code"}, transform="finance"),
             MCPToolRoute("finance_mcp", "dragon_tiger_inst", {"symbol": "ts_code"}, transform="finance"),
             MCPToolRoute("finance_mcp", "block_trade", {"symbol": "ts_code"}, transform="finance"),
@@ -293,9 +314,6 @@ class MCPDataGateway:
             if value is not None:
                 value = self._transform_argument(route, source_key, value)
                 arguments[target_key] = value
-        for key, value in params.items():
-            if key not in route.argument_map:
-                arguments.setdefault(key, value)
         return {key: value for key, value in arguments.items() if value is not None}
 
     def _transform_argument(self, route: MCPToolRoute, source_key: str, value: Any) -> Any:
@@ -304,8 +322,12 @@ class MCPDataGateway:
                 return to_tushare_ts_code(value)
             if route.transform == "china_stock":
                 return to_plain_a_share_code(value)
+            if route.transform == "stock_mcp":
+                return to_stock_mcp_symbol(value)
         if source_key in {"start_date", "end_date"} and route.transform == "finance":
             return to_yyyymmdd(value)
+        if source_key == "period" and route.transform == "stock_mcp":
+            return to_stock_mcp_period(value)
         return value
 
     def _load_server_configs(self) -> Dict[str, MCPServerConfig]:
@@ -435,6 +457,37 @@ def to_tushare_ts_code(symbol: Any) -> str:
     if code.startswith(("5", "6", "9")):
         return f"{code}.SH"
     return f"{code}.SZ"
+
+
+def to_stock_mcp_symbol(symbol: Any) -> str:
+    code = to_plain_a_share_code(symbol)
+    if "." in str(symbol or "") and len(code) == 6:
+        original = str(symbol).strip().upper()
+        if original.endswith((".SH", ".XSHG")):
+            return f"{code}.SH"
+        if original.endswith((".SZ", ".XSHE")):
+            return f"{code}.SZ"
+    if len(code) == 6 and code.startswith(("5", "6", "9")):
+        return f"{code}.SH"
+    if len(code) == 6:
+        return f"{code}.SZ"
+    return code
+
+
+def to_stock_mcp_period(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    mapping = {
+        "daily": "1y",
+        "day": "1y",
+        "d": "1y",
+        "weekly": "2y",
+        "week": "2y",
+        "w": "2y",
+        "monthly": "5y",
+        "month": "5y",
+        "m": "5y",
+    }
+    return mapping.get(raw, raw or "1y")
 
 
 def to_yyyymmdd(value: Any) -> Any:

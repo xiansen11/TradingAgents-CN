@@ -158,6 +158,7 @@ class DataSourceType(str, Enum):
     MONGODB = "mongodb"
 
     # 中国市场数据源
+    MCP_CHINA = "mcp_china"
     TUSHARE = "tushare"
     AKSHARE = "akshare"
     BAOSTOCK = "baostock"

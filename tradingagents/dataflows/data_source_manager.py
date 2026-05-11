@@ -1562,6 +1562,13 @@ class DataSourceManager:
                 else:
                     logger.warning(f"⚠️ [数据来源: Tushare失败] 返回无效信息，尝试降级: {symbol}")
                     return self._try_fallback_stock_info(symbol)
+            elif self.current_source == ChinaDataSource.MCP_CHINA:
+                result = self._get_mcp_china_stock_info(symbol)
+                if result.get('name') and result['name'] != f'股票{symbol}':
+                    logger.info(f"✅ [数据来源: MCP-股票信息] 成功获取: {symbol}")
+                    return result
+                logger.warning(f"⚠️ [数据来源: MCP失败] 返回无效信息，尝试降级: {symbol}")
+                return self._try_fallback_stock_info(symbol)
             else:
                 adapter = self.get_data_adapter()
                 if adapter and hasattr(adapter, 'get_stock_info'):
@@ -1662,6 +1669,8 @@ class DataSourceManager:
                 if source == ChinaDataSource.TUSHARE:
                     # 🔥 直接调用 Tushare 适配器，避免循环调用
                     result = self._get_tushare_stock_info(symbol)
+                elif source == ChinaDataSource.MCP_CHINA:
+                    result = self._get_mcp_china_stock_info(symbol)
                 elif source == ChinaDataSource.AKSHARE:
                     result = self._get_akshare_stock_info(symbol)
                 elif source == ChinaDataSource.BAOSTOCK:
@@ -1693,6 +1702,32 @@ class DataSourceManager:
         # 所有数据源都失败，返回默认值
         logger.error(f"❌ 所有数据源都无法获取{symbol}的股票信息")
         return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'unknown'}
+
+    def _get_mcp_china_stock_info(self, symbol: str) -> Dict:
+        """使用MCP China获取股票基本信息。"""
+        provider = self._get_mcp_china_adapter()
+        if not provider:
+            return {}
+
+        try:
+            result = _run_async_provider_call(provider.get_stock_basic_info(symbol))
+            if not isinstance(result, dict):
+                return {}
+            name = result.get('name') or result.get('stock_name')
+            if not name:
+                return {}
+            return {
+                'symbol': symbol,
+                'name': name,
+                'area': result.get('area', '未知') or '未知',
+                'industry': result.get('industry', '未知') or '未知',
+                'market': result.get('market') or result.get('market_info', {}).get('name', 'A股'),
+                'list_date': result.get('list_date', '未知') or '未知',
+                'source': result.get('source') or result.get('data_source', 'mcp_china'),
+            }
+        except Exception as e:
+            logger.error(f"❌ [MCP股票信息] 获取失败: {symbol}, 错误: {e}")
+            return {}
 
     def _get_akshare_stock_info(self, symbol: str) -> Dict:
         """使用AKShare获取股票基本信息
@@ -2250,6 +2285,22 @@ def get_china_stock_data_unified(symbol: str, start_date: str, end_date: str) ->
     else:
         logger.info(f"🔍 [股票代码追踪] 返回结果: None")
     return result
+
+
+def _run_async_provider_call(coro):
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    if not loop.is_running():
+        return loop.run_until_complete(coro)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(lambda: asyncio.run(coro)).result()
 
 
 def get_china_stock_info_unified(symbol: str) -> Dict:
