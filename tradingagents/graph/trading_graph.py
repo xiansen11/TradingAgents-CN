@@ -594,6 +594,14 @@ class TradingAgentsGraph:
         注意：ToolNode 包含所有可能的工具，但 LLM 只会调用它绑定的工具。
         ToolNode 的作用是执行 LLM 生成的 tool_calls，而不是限制 LLM 可以调用哪些工具。
         """
+        if self.config.get("a_share_mode", True):
+            return {
+                "market": ToolNode([self.toolkit.get_stock_market_data_unified]),
+                "social": ToolNode([self.toolkit.get_stock_sentiment_unified]),
+                "news": ToolNode([self.toolkit.get_stock_news_unified]),
+                "fundamentals": ToolNode([self.toolkit.get_stock_fundamentals_unified]),
+            }
+
         return {
             "market": ToolNode(
                 [

@@ -19,6 +19,14 @@ except ImportError:
     TushareProvider = None
     TUSHARE_AVAILABLE = False
 
+try:
+    from .mcp_provider import ChinaMCPProvider, get_china_mcp_provider
+    MCP_CHINA_AVAILABLE = True
+except ImportError:
+    ChinaMCPProvider = None
+    get_china_mcp_provider = None
+    MCP_CHINA_AVAILABLE = False
+
 # 导入 Baostock 提供器
 try:
     from .baostock import BaostockProvider
@@ -40,9 +48,11 @@ __all__ = [
     'AKSHARE_AVAILABLE',
     'TushareProvider',
     'TUSHARE_AVAILABLE',
+    'ChinaMCPProvider',
+    'get_china_mcp_provider',
+    'MCP_CHINA_AVAILABLE',
     'BaostockProvider',
     'BAOSTOCK_AVAILABLE',
     'get_fundamentals_snapshot',
     'FUNDAMENTALS_SNAPSHOT_AVAILABLE',
 ]
-

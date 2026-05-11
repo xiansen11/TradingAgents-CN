@@ -34,6 +34,7 @@ class ChinaDataSource(Enum):
     """
     MONGODB = DataSourceCode.MONGODB  # MongoDB数据库缓存（最高优先级）
     TUSHARE = DataSourceCode.TUSHARE
+    MCP_CHINA = DataSourceCode.MCP_CHINA
     AKSHARE = DataSourceCode.AKSHARE
     BAOSTOCK = DataSourceCode.BAOSTOCK
 
@@ -136,6 +137,7 @@ class DataSourceManager:
 
                 # 转换为 ChinaDataSource 枚举（使用统一编码）
                 source_mapping = {
+                    DataSourceCode.MCP_CHINA: ChinaDataSource.MCP_CHINA,
                     DataSourceCode.TUSHARE: ChinaDataSource.TUSHARE,
                     DataSourceCode.AKSHARE: ChinaDataSource.AKSHARE,
                     DataSourceCode.BAOSTOCK: ChinaDataSource.BAOSTOCK,
@@ -163,8 +165,9 @@ class DataSourceManager:
         # 🔥 回退到默认顺序（兼容性）
         # 默认顺序：AKShare > Tushare > BaoStock
         default_order = [
-            ChinaDataSource.AKSHARE,
+            ChinaDataSource.MCP_CHINA,
             ChinaDataSource.TUSHARE,
+            ChinaDataSource.AKSHARE,
             ChinaDataSource.BAOSTOCK,
         ]
         # 只返回可用的数据源
@@ -210,16 +213,17 @@ class DataSourceManager:
             return ChinaDataSource.MONGODB
 
         # 从环境变量获取，默认使用AKShare作为第一优先级数据源
-        env_source = os.getenv('DEFAULT_CHINA_DATA_SOURCE', DataSourceCode.AKSHARE).lower()
+        env_source = os.getenv('DEFAULT_CHINA_DATA_SOURCE', DataSourceCode.MCP_CHINA).lower()
 
         # 映射到枚举（使用统一编码）
         source_mapping = {
+            DataSourceCode.MCP_CHINA: ChinaDataSource.MCP_CHINA,
             DataSourceCode.TUSHARE: ChinaDataSource.TUSHARE,
             DataSourceCode.AKSHARE: ChinaDataSource.AKSHARE,
             DataSourceCode.BAOSTOCK: ChinaDataSource.BAOSTOCK,
         }
 
-        return source_mapping.get(env_source, ChinaDataSource.AKSHARE)
+        return source_mapping.get(env_source, ChinaDataSource.MCP_CHINA)
 
     # ==================== Tushare数据接口 ====================
 
@@ -270,6 +274,8 @@ class DataSourceManager:
             # 根据数据源调用相应的获取方法
             if self.current_source == ChinaDataSource.MONGODB:
                 result = self._get_mongodb_fundamentals(symbol)
+            elif self.current_source == ChinaDataSource.MCP_CHINA:
+                result = self._get_mcp_china_fundamentals(symbol)
             elif self.current_source == ChinaDataSource.TUSHARE:
                 result = self._get_tushare_fundamentals(symbol)
             elif self.current_source == ChinaDataSource.AKSHARE:
@@ -354,6 +360,8 @@ class DataSourceManager:
             # 根据数据源调用相应的获取方法
             if self.current_source == ChinaDataSource.MONGODB:
                 result = self._get_mongodb_news(symbol, hours_back, limit)
+            elif self.current_source == ChinaDataSource.MCP_CHINA:
+                result = self._get_mcp_china_news(symbol, hours_back, limit)
             elif self.current_source == ChinaDataSource.TUSHARE:
                 result = self._get_tushare_news(symbol, hours_back, limit)
             elif self.current_source == ChinaDataSource.AKSHARE:
@@ -438,11 +446,11 @@ class DataSourceManager:
             else:
                 logger.warning("⚠️ [数据源配置] 数据库中没有数据源配置，将检查所有已安装的数据源")
                 # 如果数据库中没有配置，默认所有数据源都启用
-                enabled_sources_in_db = {'mongodb', 'tushare', 'akshare', 'baostock'}
+                enabled_sources_in_db = {'mongodb', 'mcp_china', 'tushare', 'akshare', 'baostock'}
         except Exception as e:
             logger.warning(f"⚠️ [数据源配置] 从数据库读取失败: {e}，将检查所有已安装的数据源")
             # 如果读取失败，默认所有数据源都启用
-            enabled_sources_in_db = {'mongodb', 'tushare', 'akshare', 'baostock'}
+            enabled_sources_in_db = {'mongodb', 'mcp_china', 'tushare', 'akshare', 'baostock'}
 
         # 检查MongoDB（最高优先级）
         if self.use_mongodb_cache and 'mongodb' in enabled_sources_in_db:
@@ -463,6 +471,20 @@ class DataSourceManager:
         datasource_configs = self._get_datasource_configs_from_db()
 
         # 检查Tushare
+        if 'mcp_china' in enabled_sources_in_db and os.getenv("MCP_ENABLED", "true").lower() in {"1", "true", "yes", "on"}:
+            try:
+                from tradingagents.dataflows.providers.china.mcp_provider import get_china_mcp_provider
+                provider = get_china_mcp_provider()
+                if provider.is_available():
+                    available.append(ChinaDataSource.MCP_CHINA)
+                    logger.info("MCP China data source is available and enabled")
+                else:
+                    logger.warning("MCP China data source is enabled but not available")
+            except Exception as e:
+                logger.warning(f"MCP China data source is not available: {e}")
+        elif 'mcp_china' not in enabled_sources_in_db:
+            logger.info("MCP China data source is disabled in database config")
+
         if 'tushare' in enabled_sources_in_db:
             try:
                 import tushare as ts
@@ -553,6 +575,8 @@ class DataSourceManager:
         """获取当前数据源的适配器"""
         if self.current_source == ChinaDataSource.MONGODB:
             return self._get_mongodb_adapter()
+        elif self.current_source == ChinaDataSource.MCP_CHINA:
+            return self._get_mcp_china_adapter()
         elif self.current_source == ChinaDataSource.TUSHARE:
             return self._get_tushare_adapter()
         elif self.current_source == ChinaDataSource.AKSHARE:
@@ -570,6 +594,15 @@ class DataSourceManager:
             return get_mongodb_cache_adapter()
         except ImportError as e:
             logger.error(f"❌ MongoDB适配器导入失败: {e}")
+            return None
+
+    def _get_mcp_china_adapter(self):
+        """Get the optional MCP China provider."""
+        try:
+            from .providers.china.mcp_provider import get_china_mcp_provider
+            return get_china_mcp_provider()
+        except ImportError as e:
+            logger.error(f"MCP China provider import failed: {e}")
             return None
 
     def _get_tushare_adapter(self):
@@ -1066,6 +1099,9 @@ class DataSourceManager:
 
             if self.current_source == ChinaDataSource.MONGODB:
                 result, actual_source = self._get_mongodb_data(symbol, start_date, end_date, period)
+            elif self.current_source == ChinaDataSource.MCP_CHINA:
+                result = self._get_mcp_china_data(symbol, start_date, end_date, period)
+                actual_source = "mcp_china"
             elif self.current_source == ChinaDataSource.TUSHARE:
                 logger.info(f"🔍 [股票代码追踪] 调用 Tushare 数据源，传入参数: symbol='{symbol}', period='{period}'")
                 result = self._get_tushare_data(symbol, start_date, end_date, period)
@@ -1179,6 +1215,16 @@ class DataSourceManager:
             logger.error(f"❌ [数据来源: MongoDB异常] 获取{period}数据失败: {symbol}, 错误: {e}")
             # MongoDB异常，降级到其他数据源
             return self._try_fallback_sources(symbol, start_date, end_date, period)
+
+    def _get_mcp_china_data(self, symbol: str, start_date: str, end_date: str, period: str = "daily") -> str:
+        """Fetch A-share market data through the optional MCP gateway."""
+        provider = self._get_mcp_china_adapter()
+        if not provider:
+            return "MCP China provider is not available"
+        result = provider.get_market_report(symbol, start_date, end_date, period)
+        if result:
+            return result
+        return "MCP China did not return usable market data"
 
     def _get_tushare_data(self, symbol: str, start_date: str, end_date: str, period: str = "daily") -> str:
         """使用Tushare获取多周期数据 - 使用provider + 统一缓存"""
@@ -1398,7 +1444,9 @@ class DataSourceManager:
                     logger.info(f"🔄 [备用数据源] 尝试 {source.value} 获取{period}数据: {symbol}")
 
                     # 直接调用具体的数据源方法，避免递归
-                    if source == ChinaDataSource.TUSHARE:
+                    if source == ChinaDataSource.MCP_CHINA:
+                        result = self._get_mcp_china_data(symbol, start_date, end_date, period)
+                    elif source == ChinaDataSource.TUSHARE:
                         result = self._get_tushare_data(symbol, start_date, end_date, period)
                     elif source == ChinaDataSource.AKSHARE:
                         result = self._get_akshare_data(symbol, start_date, end_date, period)
@@ -1833,6 +1881,16 @@ class DataSourceManager:
             # MongoDB 异常，降级到其他数据源
             return self._try_fallback_fundamentals(symbol)
 
+    def _get_mcp_china_fundamentals(self, symbol: str) -> str:
+        """Fetch fundamentals through the optional MCP gateway."""
+        provider = self._get_mcp_china_adapter()
+        if not provider:
+            return "MCP China provider is not available"
+        result = provider.get_fundamentals_report(symbol)
+        if result:
+            return result
+        return "MCP China did not return usable fundamentals data"
+
     def _get_tushare_fundamentals(self, symbol: str) -> str:
         """从 Tushare 获取基本面数据 - 暂时不可用，需要实现"""
         logger.warning(f"⚠️ Tushare基本面数据功能暂时不可用")
@@ -2029,7 +2087,9 @@ class DataSourceManager:
                     logger.info(f"🔄 尝试备用数据源获取基本面: {source.value}")
 
                     # 直接调用具体的数据源方法，避免递归
-                    if source == ChinaDataSource.TUSHARE:
+                    if source == ChinaDataSource.MCP_CHINA:
+                        result = self._get_mcp_china_fundamentals(symbol)
+                    elif source == ChinaDataSource.TUSHARE:
                         result = self._get_tushare_fundamentals(symbol)
                     elif source == ChinaDataSource.AKSHARE:
                         result = self._get_akshare_fundamentals(symbol)
@@ -2070,6 +2130,21 @@ class DataSourceManager:
             logger.error(f"❌ [数据来源: MongoDB] 获取新闻失败: {e}")
             return self._try_fallback_news(symbol, hours_back, limit)
 
+    def _get_mcp_china_news(self, symbol: str, hours_back: int, limit: int) -> List[Dict[str, Any]]:
+        """Fetch news through the optional MCP gateway."""
+        provider = self._get_mcp_china_adapter()
+        if not provider:
+            return []
+        result = provider.gateway.call("news", symbol=symbol, params={"limit": limit, "hours_back": hours_back})
+        if not result.ok:
+            return []
+        records = result.content if isinstance(result.content, list) else [result.content]
+        return [
+            {"source": result.server, "tool": result.tool, "content": item}
+            for item in records
+            if item
+        ]
+
     def _get_tushare_news(self, symbol: str, hours_back: int, limit: int) -> List[Dict[str, Any]]:
         """从Tushare获取新闻数据"""
         try:
@@ -2105,7 +2180,9 @@ class DataSourceManager:
                     logger.info(f"🔄 尝试备用数据源获取新闻: {source.value}")
 
                     # 直接调用具体的数据源方法，避免递归
-                    if source == ChinaDataSource.TUSHARE:
+                    if source == ChinaDataSource.MCP_CHINA:
+                        result = self._get_mcp_china_news(symbol, hours_back, limit)
+                    elif source == ChinaDataSource.TUSHARE:
                         result = self._get_tushare_news(symbol, hours_back, limit)
                     elif source == ChinaDataSource.AKSHARE:
                         result = self._get_akshare_news(symbol, hours_back, limit)

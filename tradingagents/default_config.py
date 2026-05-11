@@ -19,8 +19,13 @@ DEFAULT_CONFIG = {
     "max_recur_limit": 100,
     # Tool settings - 从环境变量读取，提供默认值
     "online_tools": os.getenv("ONLINE_TOOLS_ENABLED", "false").lower() == "true",
-    "online_news": os.getenv("ONLINE_NEWS_ENABLED", "true").lower() == "true", 
+    "online_news": os.getenv("ONLINE_NEWS_ENABLED", "true").lower() == "true",
     "realtime_data": os.getenv("REALTIME_DATA_ENABLED", "false").lower() == "true",
+    "mcp_enabled": os.getenv("MCP_ENABLED", "true").lower() == "true",
+    "mcp_legacy_fallback_enabled": os.getenv("MCP_LEGACY_FALLBACK_ENABLED", "true").lower() == "true",
+    "mcp_timeout_seconds": int(os.getenv("MCP_TIMEOUT_SECONDS", "30")),
+    "mcp_primary_news": os.getenv("MCP_PRIMARY_NEWS", "finance_mcp"),
+    "mcp_primary_market": os.getenv("MCP_PRIMARY_MARKET", "china_stock_mcp"),
 
     # Note: Database and cache configuration is now managed by .env file and config.database_manager
     # No database/cache settings in default config to avoid configuration conflicts

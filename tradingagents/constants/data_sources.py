@@ -26,6 +26,7 @@ class DataSourceCode(str, Enum):
     
     # ==================== 缓存数据源 ====================
     MONGODB = "mongodb"  # MongoDB 数据库缓存（最高优先级）
+    MCP_CHINA = "mcp_china"  # MCP gateway for A-share data
     
     # ==================== 中国市场数据源 ====================
     TUSHARE = "tushare"      # Tushare - 专业A股数据
@@ -85,6 +86,18 @@ DATA_SOURCE_REGISTRY: Dict[str, DataSourceInfo] = {
         requires_api_key=False,
         is_free=True,
         features=["本地缓存", "最快速度", "离线可用"],
+    ),
+
+    DataSourceCode.MCP_CHINA: DataSourceInfo(
+        code=DataSourceCode.MCP_CHINA,
+        name="MCP China Gateway",
+        display_name="MCP China Gateway",
+        provider="MCP",
+        description="Optional MCP gateway for A-share market, fundamentals, news, and sentiment data.",
+        supported_markets=["a_shares"],
+        requires_api_key=False,
+        is_free=True,
+        features=["A-share data gateway", "MCP routing", "legacy fallback"],
     ),
     
     # Tushare
@@ -342,4 +355,3 @@ def is_data_source_supported(code: str) -> bool:
         是否支持
     """
     return code in DATA_SOURCE_REGISTRY
-

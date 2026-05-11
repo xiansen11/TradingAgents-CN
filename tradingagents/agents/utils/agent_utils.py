@@ -856,6 +856,16 @@ class Toolkit:
                 logger.info(f"🔍 [股票代码追踪] 进入A股处理分支，ticker: '{ticker}'")
                 logger.info(f"💡 [优化策略] 基本面分析只获取当前价格和财务数据，不获取历史日线数据")
 
+                try:
+                    from tradingagents.dataflows.providers.china.mcp_provider import get_china_mcp_provider
+                    mcp_provider = get_china_mcp_provider()
+                    if mcp_provider.is_available():
+                        mcp_fundamentals = mcp_provider.get_fundamentals_report(ticker)
+                        if mcp_fundamentals:
+                            result_data.append(f"## A股MCP基本面数据\n{mcp_fundamentals}")
+                except Exception as e:
+                    logger.info(f"MCP fundamentals unavailable, using legacy A-share fallback: {e}")
+
                 # 优化策略：基本面分析不需要大量历史日线数据
                 # 只获取当前股价信息（最近1-2天即可）和基本面财务数据
                 try:
@@ -1193,6 +1203,17 @@ class Toolkit:
                 # 中国A股和港股：使用AKShare东方财富新闻和Google新闻（中文搜索）
                 logger.info(f"🇨🇳🇭🇰 [统一新闻工具] 处理中文新闻...")
 
+                if is_china:
+                    try:
+                        from tradingagents.dataflows.providers.china.mcp_provider import get_china_mcp_provider
+                        mcp_provider = get_china_mcp_provider()
+                        if mcp_provider.is_available():
+                            mcp_news = mcp_provider.get_news_report(ticker, limit=10)
+                            if mcp_news:
+                                result_data.append(f"## A股MCP新闻\n{mcp_news}")
+                    except Exception as e:
+                        logger.info(f"MCP news unavailable, using legacy news fallback: {e}")
+
                 # 1. 尝试获取AKShare东方财富新闻
                 try:
                     # 处理股票代码
@@ -1320,6 +1341,17 @@ class Toolkit:
             if is_china or is_hk:
                 # 中国A股和港股：使用社交媒体情绪分析
                 logger.info(f"🇨🇳🇭🇰 [统一情绪工具] 处理中文市场情绪...")
+
+                if is_china:
+                    try:
+                        from tradingagents.dataflows.providers.china.mcp_provider import get_china_mcp_provider
+                        mcp_provider = get_china_mcp_provider()
+                        if mcp_provider.is_available():
+                            mcp_sentiment = mcp_provider.get_sentiment_report(ticker)
+                            if mcp_sentiment:
+                                result_data.append(f"## A股MCP资金与交易情绪\n{mcp_sentiment}")
+                    except Exception as e:
+                        logger.info(f"MCP sentiment unavailable, using legacy sentiment fallback: {e}")
 
                 try:
                     # 可以集成微博、雪球、东方财富等中文社交媒体情绪
