@@ -192,6 +192,7 @@ export const ActionTypes = {
   USER_LOGOUT: 'user_logout',
   USER_MANAGEMENT: 'user_management',  // 🔧 添加用户管理操作类型
   DATABASE_OPERATION: 'database_operation',
+  SCREENING: 'screening',
   REPORT_GENERATION: 'report_generation'
 } as const
 

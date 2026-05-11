@@ -214,7 +214,6 @@ const authStore = useAuthStore()
 // 响应式数据
 const loading = ref(false)
 const searchKeyword = ref('')
-const marketFilter = ref('A股')
 const dateRange = ref<[string, string] | null>(null)
 const selectedReports = ref<ReportListItem[]>([])
 const currentPage = ref(1)

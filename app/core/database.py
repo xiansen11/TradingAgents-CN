@@ -244,6 +244,19 @@ async def create_database_indexes(db):
         await market_quotes.create_index([("amount", -1)])
         await market_quotes.create_index([("updated_at", -1)])
 
+        # Daily Feishu push subscriptions and run history.
+        daily_push_subscriptions = db["daily_push_subscriptions"]
+        await daily_push_subscriptions.create_index([("user_id", 1), ("created_at", -1)])
+        await daily_push_subscriptions.create_index([("enabled", 1), ("next_run_at", 1)])
+
+        daily_push_runs = db["daily_push_runs"]
+        await daily_push_runs.create_index([("subscription_id", 1), ("created_at", -1)])
+        await daily_push_runs.create_index([("status", 1), ("updated_at", -1)])
+        await daily_push_runs.create_index(
+            [("subscription_id", 1), ("stock_symbol", 1), ("run_key", 1)],
+            unique=True,
+        )
+
         logger.info("✅ 数据库索引创建完成")
 
     except Exception as e:

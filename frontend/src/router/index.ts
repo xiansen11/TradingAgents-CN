@@ -96,6 +96,28 @@ const routes: RouteRecordRaw[] = [
     ]
   },
   {
+    path: '/daily-push',
+    name: 'DailyPush',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: '每日推送',
+      icon: 'Bell',
+      requiresAuth: true,
+      transition: 'fade'
+    },
+    children: [
+      {
+        path: '',
+        name: 'DailyPushHome',
+        component: () => import('@/views/DailyPush/index.vue'),
+        meta: {
+          title: '每日推送',
+          requiresAuth: true
+        }
+      }
+    ]
+  },
+  {
     path: '/settings',
     name: 'Settings',
     component: () => import('@/layouts/BasicLayout.vue'),

@@ -28,7 +28,7 @@ from pathlib import Path
 from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.core.logging_config import setup_logging
-from app.routers import auth_db as auth, analysis, sse, health, config, reports, database, operation_logs, tags, tushare_init, akshare_init, baostock_init, historical_data, multi_period_sync, financial_data, news_data, usage_statistics, model_capabilities, cache, logs
+from app.routers import auth_db as auth, analysis, sse, health, config, reports, database, operation_logs, tags, tushare_init, akshare_init, baostock_init, historical_data, multi_period_sync, financial_data, news_data, usage_statistics, model_capabilities, cache, logs, daily_push
 from app.routers import sync as sync_router, multi_source_sync
 from app.routers import stocks as stocks_router
 from app.routers import stock_data as stock_data_router
@@ -559,6 +559,18 @@ async def lifespan(app: FastAPI):
         else:
             logger.info(f"📰 新闻数据同步已配置（A股）: {settings.NEWS_SYNC_CRON}")
 
+        from app.services.daily_push_service import get_daily_push_service
+
+        daily_push_service = get_daily_push_service()
+        await daily_push_service.ensure_indexes()
+        scheduler.add_job(
+            daily_push_service.dispatch_due_subscriptions,
+            IntervalTrigger(minutes=1, timezone=settings.TIMEZONE),
+            id="daily_push_dispatcher",
+            name="每日飞书股票报告推送"
+        )
+        logger.info("每日飞书股票报告推送调度器已启动")
+
         scheduler.start()
 
         # 设置调度器实例到服务中，以便API可以管理任务
@@ -700,6 +712,7 @@ app.include_router(websocket_notifications_router.router, prefix="/api", tags=["
 
 # 定时任务管理
 app.include_router(scheduler_router.router, tags=["scheduler"])
+app.include_router(daily_push.router, tags=["daily-push"])
 
 app.include_router(sse.router, prefix="/api/stream", tags=["streaming"])
 app.include_router(sync_router.router)

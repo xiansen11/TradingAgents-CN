@@ -21,6 +21,11 @@
       <template #title>分析报告</template>
     </el-menu-item>
 
+    <el-menu-item index="/daily-push">
+      <el-icon><Bell /></el-icon>
+      <template #title>每日推送</template>
+    </el-menu-item>
+
     <el-sub-menu index="/settings-config">
       <template #title>
         <el-icon><Setting /></el-icon>
@@ -55,6 +60,7 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import {
+  Bell,
   Document,
   InfoFilled,
   Monitor,

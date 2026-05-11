@@ -664,9 +664,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { useRoute } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import {
   Document,
   TrendCharts,
@@ -713,7 +713,6 @@ interface AnalysisForm {
 
 // 使用store
 const authStore = useAuthStore()
-const router = useRouter()
 const route = useRoute()
 
 const submitting = ref(false)
@@ -813,6 +812,7 @@ const onMarketChange = () => {
   analysisForm.market = '\u0041\u80a1'
   validateStockCodeInput()
 }
+void onMarketChange
 
 // 验证股票代码输入
 const validateStockCodeInput = () => {
@@ -1481,6 +1481,7 @@ const parseRecommendation = () => {
     riskLevel: String(riskLevel)
   }
 }
+void parseRecommendation
 
 // 一键模拟下单（应用到交易）
 onUnmounted(() => {
