@@ -655,7 +655,7 @@
                     <div v-if="detailedReports.length > 0" class="analysis-reading-layout">
                       <aside class="reports-sidebar">
                         <div class="reports-sidebar-inner">
-                          <div class="reports-sidebar-title">????</div>
+                          <div class="reports-sidebar-title">报告目录</div>
                           <button
                             v-for="report in detailedReports"
                             :key="report.sectionId"
@@ -697,14 +697,14 @@
                               v-html="formatReportContent(report.content)"
                             ></div>
                             <div v-else class="no-content">
-                              <el-empty description="????" />
+                              <el-empty description="暂无内容" />
                             </div>
                           </div>
                         </section>
                       </div>
                     </div>
                     <div v-else class="no-content">
-                      <el-empty description="????????" />
+                      <el-empty description="暂无详细分析报告" />
                     </div>
                   </div>
                 </div>
@@ -1428,7 +1428,7 @@ const consumeLiveEventPayload = (status: any, source = 'poll') => {
 
     status.steps.forEach((step: any, index: number) => {
       const stepTitle = String(step?.name || `?? ${index + 1}`).trim()
-      const stepDescription = String(step?.description || '????????').trim()
+      const stepDescription = String(step?.description || '正在处理当前阶段').trim()
       const stepKey = `${index}:${stepTitle}`
       const nextStatus = normalizeStepStatus(step?.status)
       const previousStatus = previousStepStatusMap.value[stepKey]
@@ -1527,7 +1527,7 @@ const consumeLiveEventPayload = (status: any, source = 'poll') => {
     pushLiveEvent({
       type: status.status === 'failed' ? 'failed' : status.status === 'completed' ? 'completed' : 'phase_started',
       title: phaseMeta.title,
-      body: phaseMeta.body || '??????????',
+      body: phaseMeta.body || '正在处理最新分析阶段',
       status: status.status,
       timestamp: status.timestamp,
       source
@@ -1544,8 +1544,8 @@ const consumeLiveEventPayload = (status: any, source = 'poll') => {
     previousNarrativeSignature.value = narrativeSignature
     pushLiveEvent({
       type: status.status === 'failed' ? 'failed' : status.status === 'completed' ? 'completed' : 'progress',
-      title: phaseMeta.title || '?????',
-      body: phaseMeta.body || statusMessage || '????????',
+      title: phaseMeta.title || '分析进行中',
+      body: phaseMeta.body || statusMessage || '正在处理最新进度',
       status: status.status,
       timestamp: status.timestamp,
       source
@@ -3840,14 +3840,17 @@ onUnmounted(() => {
 .reports-sidebar {
   position: sticky;
   top: 88px;
+  align-self: start;
+  height: calc(100vh - 112px);
 }
 
 .reports-sidebar-inner {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: calc(100vh - 120px);
-  overflow: auto;
+  height: 100%;
+  max-height: calc(100vh - 112px);
+  overflow-y: auto;
   padding: 16px;
   background: var(--el-fill-color-light);
   border: 1px solid var(--el-border-color);
@@ -3936,9 +3939,11 @@ onUnmounted(() => {
 
   .reports-sidebar {
     position: static;
+    height: auto;
   }
 
   .reports-sidebar-inner {
+    height: auto;
     max-height: none;
   }
 }
