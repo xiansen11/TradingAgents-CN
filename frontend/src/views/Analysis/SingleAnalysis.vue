@@ -225,6 +225,17 @@
                   </template>
 
                   <div class="progress-content">
+                    <div class="progress-overview">
+                      <div class="progress-connection">
+                        <el-tag :type="getStreamConnectionTagType()" effect="dark">
+                          {{ getStreamConnectionLabel() }}
+                        </el-tag>
+                        <span class="connection-mode">
+                          {{ streamMode === 'sse' ? 'SSE 实时流' : '轮询兜底' }}
+                        </span>
+                      </div>
+                    </div>
+
                     <!-- 总体进度信息 -->
                     <div class="overall-progress-info">
                       <div class="progress-stats">
@@ -281,6 +292,70 @@
                         style="white-space: pre-wrap; line-height: 1.6;"
                       >
                         {{ progressInfo.currentStepDescription || progressInfo.message || 'AI正在根据您的要求重点分析相关内容' }}
+                      </div>
+                    </div>
+
+                    <div class="progress-workspace">
+                      <div class="progress-panel timeline-panel">
+                        <div class="panel-title">分析时间线</div>
+                        <div v-if="analysisSteps.length > 0" class="steps-container">
+                          <div
+                            v-for="(step, index) in analysisSteps"
+                            :key="step.key || index"
+                            class="step-item"
+                            :class="{
+                              'step-completed': step.status === 'completed',
+                              'step-active': step.status === 'active',
+                              'step-pending': step.status === 'pending',
+                              'step-failed': step.status === 'failed'
+                            }"
+                          >
+                            <div class="step-icon">
+                              <el-icon v-if="step.status === 'completed'" class="completed-icon">
+                                <Check />
+                              </el-icon>
+                              <el-icon v-else-if="step.status === 'active'" class="current-icon rotating-icon">
+                                <Loading />
+                              </el-icon>
+                              <el-icon v-else-if="step.status === 'failed'" class="failed-icon">
+                                <WarningFilled />
+                              </el-icon>
+                              <span v-else class="pending-dot" />
+                            </div>
+                            <div class="step-content">
+                              <div class="step-title">{{ step.title }}</div>
+                              <div class="step-description">{{ step.description }}</div>
+                            </div>
+                          </div>
+                        </div>
+                        <div v-else class="empty-progress-panel">
+                          正在等待后端返回步骤结构...
+                        </div>
+                      </div>
+
+                      <div class="progress-panel live-panel">
+                        <div class="panel-title">实时过程输出</div>
+                        <div v-if="liveEvents.length > 0" ref="liveEventsContainer" class="live-events">
+                          <div
+                            v-for="event in liveEvents"
+                            :key="event.id"
+                            class="live-event"
+                          >
+                            <div class="live-event-header">
+                              <div class="live-event-title">{{ event.title }}</div>
+                              <div class="live-event-meta">
+                                <el-tag :type="getLiveEventTagType(event.type, event.status)" size="small" effect="plain">
+                                  {{ event.type === 'system' ? '系统' : event.status === 'failed' ? '失败' : event.status === 'completed' ? '完成' : event.type === 'phase_started' ? '阶段' : '进度' }}
+                                </el-tag>
+                                <span class="live-event-time">{{ formatEventTime(event.timestamp) }}</span>
+                              </div>
+                            </div>
+                            <div class="live-event-body">{{ event.body }}</div>
+                          </div>
+                        </div>
+                        <div v-else class="empty-progress-panel">
+                          实时事件会随着分析推进持续显示在这里。
+                        </div>
                       </div>
                     </div>
 
@@ -577,46 +652,63 @@
 
                   <!-- 美观的标签页展示 -->
                   <div class="analysis-tabs-container">
-                    <el-tabs
-                      v-model="activeReportTab"
-                      type="card"
-                      class="analysis-tabs"
-                      tab-position="top"
-                      :key="analysisResults?.id || 'default'"
-                    >
-                      <el-tab-pane
-                        v-for="(report, key) in getAnalysisReports(analysisResults)"
-                        :key="key"
-                        :name="key.toString()"
-                        :label="report.title"
-                        class="report-tab-pane"
-                      >
-                        <!-- 标签页内容头部 -->
-                        <div class="report-header">
-                          <div class="report-title">
-                            <span class="report-icon">{{ getReportIcon(report.title) }}</span>
-                            <span class="report-name">{{ getReportName(report.title) }}</span>
-                          </div>
-                          <div class="report-description">{{ getReportDescription(report.title) }}</div>
+                    <div v-if="detailedReports.length > 0" class="analysis-reading-layout">
+                      <aside class="reports-sidebar">
+                        <div class="reports-sidebar-inner">
+                          <div class="reports-sidebar-title">????</div>
+                          <button
+                            v-for="report in detailedReports"
+                            :key="report.sectionId"
+                            type="button"
+                            class="report-nav-item"
+                            :class="{ 'is-active': activeReportTab === report.sectionId }"
+                            @click="scrollToReportSection(report.sectionId)"
+                          >
+                            <span class="report-nav-icon">{{ getReportIcon(report.title) }}</span>
+                            <span class="report-nav-copy">
+                              <span class="report-nav-name">{{ getReportName(report.title) }}</span>
+                              <span class="report-nav-desc">{{ getReportDescription(report.title) }}</span>
+                            </span>
+                          </button>
                         </div>
+                      </aside>
 
-                        <!-- 报告内容 -->
-                        <div class="report-content-wrapper">
-                          <div
-                            class="report-content"
-                            v-html="formatReportContent(report.content)"
-                            v-if="report.content"
-                          ></div>
-                          <div v-else class="no-content">
-                            <el-empty description="暂无内容" />
+                      <div class="reports-reader">
+                        <section
+                          v-for="report in detailedReports"
+                          :key="report.sectionId"
+                          :id="report.sectionId"
+                          :data-report-section-id="report.sectionId"
+                          :ref="(el) => setReportSectionRef(report.sectionId, el)"
+                          class="report-section-card"
+                        >
+                          <div class="report-header">
+                            <div class="report-title">
+                              <span class="report-icon">{{ getReportIcon(report.title) }}</span>
+                              <span class="report-name">{{ getReportName(report.title) }}</span>
+                            </div>
+                            <div class="report-description">{{ getReportDescription(report.title) }}</div>
                           </div>
-                        </div>
-                      </el-tab-pane>
-                    </el-tabs>
+
+                          <div class="report-content-wrapper">
+                            <div
+                              v-if="report.content"
+                              class="report-content"
+                              v-html="formatReportContent(report.content)"
+                            ></div>
+                            <div v-else class="no-content">
+                              <el-empty description="????" />
+                            </div>
+                          </div>
+                        </section>
+                      </div>
+                    </div>
+                    <div v-else class="no-content">
+                      <el-empty description="????????" />
+                    </div>
                   </div>
                 </div>
 
-                <!-- 操作按钮 -->
                 <div class="result-actions">
 <el-dropdown trigger="click" @command="downloadReport">
                     <el-button type="primary">
@@ -664,7 +756,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
@@ -711,6 +803,14 @@ interface AnalysisForm {
   language: 'zh-CN'
 }
 
+interface DetailedReportItem {
+  key: string
+  sectionId: string
+  title: string
+  content: any
+  category?: string
+}
+
 // 使用store
 const authStore = useAuthStore()
 const route = useRoute()
@@ -722,7 +822,9 @@ const currentTaskId = ref('')
 const analysisStatus = ref('idle') // 'idle', 'running', 'completed', 'failed'
 const showResults = ref(false)
 const analysisResults = ref<any>(null)
-const activeReportTab = ref('') // 当前激活的报告标签页
+const activeReportTab = ref('')
+const reportSectionRefs = ref<Record<string, HTMLElement | null>>({})
+let reportSectionObserver: IntersectionObserver | null = null
 const progressInfo = ref({
   progress: 0,
   currentStep: '',
@@ -733,11 +835,42 @@ const progressInfo = ref({
   totalTime: 0         // 预计总时长（秒）
 })
 const pollingTimer = ref<any>(null)
+const eventSource = ref<EventSource | null>(null)
+const streamWatchdogTimer = ref<any>(null)
+const streamConnectionState = ref<'idle' | 'connecting' | 'connected' | 'fallback' | 'closed'>('idle')
+const streamMode = ref<'sse' | 'polling-fallback'>('sse')
+const liveEvents = ref<Array<{
+  id: string
+  type: string
+  title: string
+  body: string
+  timestamp: number
+  status?: string
+  source?: string
+}>>([])
+const liveEventsContainer = ref<HTMLElement | null>(null)
+const lastStreamEventAt = ref(0)
+const isPollingFallbackActive = ref(false)
+const previousStepStatusMap = ref<Record<string, string>>({})
+const hasHydratedStepEvents = ref(false)
+const previousPhaseSignature = ref('')
+const previousNarrativeSignature = ref('')
+const POLLING_INTERVAL_MS = 5000
+const STREAM_IDLE_TIMEOUT_MS = 20000
+const MAX_LIVE_EVENTS = 60
+const detailedReports = computed<DetailedReportItem[]>(() => getAnalysisReports(analysisResults.value))
 
 // 分析步骤定义（动态生成）
 const analysisSteps = ref<any[]>([])
 
 // 从后端步骤数据生成前端步骤
+const normalizeStepStatus = (status?: string) => {
+  if (status === 'current' || status === 'active' || status === 'running') return 'active'
+  if (status === 'completed' || status === 'success') return 'completed'
+  if (status === 'failed' || status === 'error') return 'failed'
+  return 'pending'
+}
+
 const generateStepsFromBackend = (backendSteps: any[]) => {
   if (!backendSteps || !Array.isArray(backendSteps)) {
     return []
@@ -747,8 +880,111 @@ const generateStepsFromBackend = (backendSteps: any[]) => {
     key: `step_${index}`,
     title: step.name || `步骤 ${index + 1}`,
     description: step.description || '处理中...',
-    status: 'pending'
+    status: normalizeStepStatus(step.status)
   }))
+}
+
+const resetLiveMonitoringState = () => {
+  liveEvents.value = []
+  streamConnectionState.value = 'idle'
+  streamMode.value = 'sse'
+  lastStreamEventAt.value = 0
+  isPollingFallbackActive.value = false
+  previousStepStatusMap.value = {}
+  hasHydratedStepEvents.value = false
+  previousPhaseSignature.value = ''
+  previousNarrativeSignature.value = ''
+}
+
+const scrollLiveEventsToBottom = async () => {
+  await nextTick()
+  const container = liveEventsContainer.value
+  if (!container) {
+    return
+  }
+  container.scrollTop = container.scrollHeight
+}
+
+const pushLiveEvent = (event: {
+  type?: string
+  title?: string
+  body?: string
+  timestamp?: number
+  status?: string
+  source?: string
+}) => {
+  const title = String(event.title || '分析进行中').trim()
+  const body = String(event.body || '').trim()
+  const type = event.type || 'progress'
+  const timestamp = Number(event.timestamp || Date.now() / 1000)
+  const lastEvent = liveEvents.value[liveEvents.value.length - 1]
+
+  if (
+    lastEvent &&
+    lastEvent.type === type &&
+    lastEvent.title === title &&
+    lastEvent.body === body &&
+    lastEvent.status === event.status
+  ) {
+    return
+  }
+
+  liveEvents.value = [
+    ...liveEvents.value,
+    {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type,
+      title,
+      body,
+      timestamp,
+      status: event.status,
+      source: event.source || streamMode.value
+    }
+  ].slice(-MAX_LIVE_EVENTS)
+  void scrollLiveEventsToBottom()
+}
+
+const getStreamConnectionLabel = () => {
+  switch (streamConnectionState.value) {
+    case 'connecting':
+      return '连接中'
+    case 'connected':
+      return '实时流'
+    case 'fallback':
+      return '轮询兜底'
+    case 'closed':
+      return '已结束'
+    default:
+      return '未连接'
+  }
+}
+
+const getStreamConnectionTagType = (): 'success' | 'warning' | 'info' | 'danger' => {
+  switch (streamConnectionState.value) {
+    case 'connected':
+      return 'success'
+    case 'fallback':
+      return 'warning'
+    case 'connecting':
+      return 'info'
+    case 'closed':
+      return 'info'
+    default:
+      return 'info'
+  }
+}
+
+const getLiveEventTagType = (type?: string, status?: string): 'success' | 'warning' | 'info' | 'danger' => {
+  if (status === 'failed' || type === 'failed') return 'danger'
+  if (status === 'completed' || type === 'completed') return 'success'
+  if (type === 'phase_started') return 'warning'
+  return 'info'
+}
+
+const formatEventTime = (timestamp?: number) => {
+  if (!timestamp) return '--:--:--'
+  const eventDate = new Date(timestamp > 1e12 ? timestamp : timestamp * 1000)
+  return eventDate.toLocaleTimeString('zh-CN', { hour12: false })
 }
 
 // 模型设置
@@ -926,6 +1162,9 @@ const submitAnalysis = async () => {
 
     analysisStatus.value = 'running'
     showResults.value = false
+    resetLiveMonitoringState()
+    closeTaskStream()
+    stopPollingTaskStatus()
     progressInfo.value = {
       progress: 0,
       currentStep: '正在初始化分析...',
@@ -940,7 +1179,14 @@ const submitAnalysis = async () => {
     analysisSteps.value = []
 
     // 开始轮询任务状态
-    startPollingTaskStatus()
+    pushLiveEvent({
+      type: 'system',
+      title: '分析任务已提交',
+      body: '正在建立实时连接并获取初始状态',
+      status: 'running',
+      source: 'system'
+    })
+    startTaskStream(currentTaskId.value)
 
     // 立即查询一次状态（不等待第一次轮询）
     setTimeout(async () => {
@@ -949,7 +1195,8 @@ const submitAnalysis = async () => {
         const status = response.data // 响应拦截器已返回 response.data
         console.log('🔄 立即查询状态:', status)
         console.log('🔄 当前 analysisStatus:', analysisStatus.value)
-        if (status.status === 'running') {
+        await handleTaskStatusUpdate(status, 'snapshot')
+        if (false && status.status === 'running') {
           analysisStatus.value = 'running'
           console.log('✅ 设置 analysisStatus 为 running')
           updateProgressInfo(status)
@@ -967,7 +1214,7 @@ const submitAnalysis = async () => {
 }
 
 // 轮询任务状态
-const startPollingTaskStatus = () => {
+const legacyStartPollingTaskStatus = () => {
   if (pollingTimer.value) {
     clearInterval(pollingTimer.value)
   }
@@ -1094,6 +1341,445 @@ const startPollingTaskStatus = () => {
   }, 5000) // 每5秒轮询一次
 }
 
+void legacyStartPollingTaskStatus
+
+const stopPollingTaskStatus = () => {
+  if (pollingTimer.value) {
+    clearInterval(pollingTimer.value)
+    pollingTimer.value = null
+  }
+  isPollingFallbackActive.value = false
+}
+
+const stopStreamWatchdog = () => {
+  if (streamWatchdogTimer.value) {
+    clearInterval(streamWatchdogTimer.value)
+    streamWatchdogTimer.value = null
+  }
+}
+
+const closeTaskStream = () => {
+  if (eventSource.value) {
+    eventSource.value.close()
+    eventSource.value = null
+  }
+  stopStreamWatchdog()
+}
+
+const buildTaskStreamUrl = (taskId: string) => {
+  const token = authStore.token || localStorage.getItem('auth-token') || ''
+  const configuredBase = String(import.meta.env.VITE_API_BASE_URL || '').trim()
+  const baseUrl = configuredBase
+    ? new URL(configuredBase, window.location.origin).toString()
+    : window.location.origin
+  const url = new URL(`/api/stream/tasks/${taskId}`, baseUrl)
+  if (token) {
+    url.searchParams.set('token', token)
+  }
+  return url.toString()
+}
+
+const startStreamWatchdog = () => {
+  stopStreamWatchdog()
+  streamWatchdogTimer.value = setInterval(() => {
+    if (analysisStatus.value !== 'running' || streamMode.value !== 'sse') {
+      return
+    }
+    if (lastStreamEventAt.value && Date.now() - lastStreamEventAt.value > STREAM_IDLE_TIMEOUT_MS) {
+      switchToPollingFallback('实时连接短暂静默，已切换为轮询兜底')
+    }
+  }, 5000)
+}
+
+const resolveCurrentPhaseMeta = (status: any) => {
+  const steps = Array.isArray(status?.steps) ? status.steps : []
+  const rawStepIndex = Number(status?.current_step)
+  const currentStepIndex = Number.isFinite(rawStepIndex) ? rawStepIndex : -1
+  const indexedStep =
+    currentStepIndex >= 0 && currentStepIndex < steps.length
+      ? steps[currentStepIndex]
+      : null
+  const activeStep = steps.find((step: any) => normalizeStepStatus(step?.status) === 'active')
+  const phaseStep = indexedStep || activeStep || null
+  const title = String(status?.current_step_name || phaseStep?.name || '').trim()
+  const body = String(
+    status?.current_step_description ||
+      phaseStep?.description ||
+      status?.message ||
+      ''
+  ).trim()
+
+  return {
+    title,
+    body,
+    currentStepIndex,
+    signature: `${currentStepIndex}|${title}|${body}`
+  }
+}
+
+const consumeLiveEventPayload = (status: any, source = 'poll') => {
+  let emittedStepTransition = false
+  const phaseMeta = resolveCurrentPhaseMeta(status)
+  const statusMessage = String(status?.message || '').trim()
+  const narrativeSignature = `${phaseMeta.title}|${phaseMeta.body}|${statusMessage}|${status?.status || ''}`
+
+  if (status.steps && Array.isArray(status.steps) && status.steps.length > 0) {
+    const nextStepStatusMap: Record<string, string> = {}
+
+    status.steps.forEach((step: any, index: number) => {
+      const stepTitle = String(step?.name || `?? ${index + 1}`).trim()
+      const stepDescription = String(step?.description || '????????').trim()
+      const stepKey = `${index}:${stepTitle}`
+      const nextStatus = normalizeStepStatus(step?.status)
+      const previousStatus = previousStepStatusMap.value[stepKey]
+      nextStepStatusMap[stepKey] = nextStatus
+
+      if (!hasHydratedStepEvents.value) {
+        const currentStepIndex = Number(status.current_step ?? -1)
+        const shouldShowRecentCompletion =
+          nextStatus === 'completed' &&
+          currentStepIndex >= 0 &&
+          index >= Math.max(0, currentStepIndex - 2)
+
+        if (shouldShowRecentCompletion) {
+          pushLiveEvent({
+            type: 'phase_completed',
+            title: `${stepTitle} ???`,
+            body: stepDescription,
+            status: status.status,
+            timestamp: status.timestamp,
+            source
+          })
+          emittedStepTransition = true
+        } else if (nextStatus === 'active') {
+          pushLiveEvent({
+            type: 'phase_started',
+            title: stepTitle,
+            body: stepDescription,
+            status: status.status,
+            timestamp: status.timestamp,
+            source
+          })
+          emittedStepTransition = true
+        }
+        return
+      }
+
+      if (!previousStatus || previousStatus === nextStatus) {
+        return
+      }
+
+      if (nextStatus === 'active') {
+        pushLiveEvent({
+          type: 'phase_started',
+          title: stepTitle,
+          body: stepDescription,
+          status: status.status,
+          timestamp: status.timestamp,
+          source
+        })
+        emittedStepTransition = true
+      } else if (nextStatus === 'completed') {
+        pushLiveEvent({
+          type: 'phase_completed',
+          title: `${stepTitle} ???`,
+          body: stepDescription,
+          status: status.status,
+          timestamp: status.timestamp,
+          source
+        })
+        emittedStepTransition = true
+      } else if (nextStatus === 'failed') {
+        pushLiveEvent({
+          type: 'failed',
+          title: `${stepTitle} ??`,
+          body: stepDescription,
+          status: 'failed',
+          timestamp: status.timestamp,
+          source
+        })
+        emittedStepTransition = true
+      }
+    })
+
+    previousStepStatusMap.value = nextStepStatusMap
+    hasHydratedStepEvents.value = true
+  }
+
+  const liveEvent = status.live_event
+  if (liveEvent && (liveEvent.title || liveEvent.body)) {
+    previousPhaseSignature.value = phaseMeta.signature
+    previousNarrativeSignature.value = `${String(liveEvent.title || '').trim()}|${String(liveEvent.body || '').trim()}|${status?.status || ''}`
+    pushLiveEvent({
+      type: liveEvent.type,
+      title: liveEvent.title,
+      body: liveEvent.body,
+      status: liveEvent.status || status.status,
+      timestamp: liveEvent.timestamp || status.timestamp,
+      source
+    })
+    return
+  }
+
+  if (!emittedStepTransition && phaseMeta.title && phaseMeta.signature !== previousPhaseSignature.value) {
+    previousPhaseSignature.value = phaseMeta.signature
+    previousNarrativeSignature.value = narrativeSignature
+    pushLiveEvent({
+      type: status.status === 'failed' ? 'failed' : status.status === 'completed' ? 'completed' : 'phase_started',
+      title: phaseMeta.title,
+      body: phaseMeta.body || '??????????',
+      status: status.status,
+      timestamp: status.timestamp,
+      source
+    })
+    return
+  }
+
+  if (
+    !emittedStepTransition &&
+    (phaseMeta.title || phaseMeta.body || statusMessage) &&
+    narrativeSignature !== previousNarrativeSignature.value
+  ) {
+    previousPhaseSignature.value = phaseMeta.signature
+    previousNarrativeSignature.value = narrativeSignature
+    pushLiveEvent({
+      type: status.status === 'failed' ? 'failed' : status.status === 'completed' ? 'completed' : 'progress',
+      title: phaseMeta.title || '?????',
+      body: phaseMeta.body || statusMessage || '????????',
+      status: status.status,
+      timestamp: status.timestamp,
+      source
+    })
+  }
+}
+
+const fetchTaskResult = async (taskId: string, fallbackData?: any) => {
+  try {
+    const resultResponse = await fetch(`/api/analysis/tasks/${taskId}/result`, {
+      headers: {
+        Authorization: `Bearer ${authStore.token}`,
+        'Content-Type': 'application/json'
+      }
+    })
+
+    if (!resultResponse.ok) {
+      return fallbackData
+    }
+
+    const resultData = await resultResponse.json()
+    return resultData.success ? resultData.data : fallbackData
+  } catch (error) {
+    console.error('获取分析结果异常:', error)
+    return fallbackData
+  }
+}
+
+const switchToPollingFallback = (message?: string) => {
+  if (analysisStatus.value !== 'running') {
+    return
+  }
+  if (streamMode.value === 'polling-fallback' && pollingTimer.value) {
+    return
+  }
+
+  closeTaskStream()
+  streamMode.value = 'polling-fallback'
+  streamConnectionState.value = 'fallback'
+
+  if (message) {
+    pushLiveEvent({
+      type: 'system',
+      title: '连接策略已切换',
+      body: message,
+      status: 'running',
+      source: 'system'
+    })
+  }
+
+  startPollingTaskStatus(true)
+}
+
+const handleTaskStatusUpdate = async (status: any, source: 'snapshot' | 'poll' | 'sse' = 'poll') => {
+  if (!status) {
+    return
+  }
+
+  const normalizedStatus = status.status === 'processing' ? 'running' : status.status
+
+  if (normalizedStatus === 'completed') {
+    analysisResults.value = await fetchTaskResult(currentTaskId.value, status.result_data)
+    analysisStatus.value = 'completed'
+    showResults.value = true
+    progressInfo.value.progress = 100
+    progressInfo.value.currentStep = '分析完成'
+    progressInfo.value.currentStepDescription = '报告已生成，可以查看完整结果'
+    progressInfo.value.message = '分析已完成！'
+    consumeLiveEventPayload({ ...status, status: 'completed' }, source)
+    stopPollingTaskStatus()
+    closeTaskStream()
+    streamConnectionState.value = 'closed'
+    ElMessage.success('分析完成！')
+    return
+  }
+
+  if (normalizedStatus === 'failed') {
+    const errorMessage = status.error_message || status.message || '分析过程中发生错误'
+    analysisStatus.value = 'failed'
+    progressInfo.value.currentStep = '分析失败'
+    progressInfo.value.currentStepDescription = errorMessage
+    progressInfo.value.message = errorMessage
+    consumeLiveEventPayload({
+      ...status,
+      status: 'failed',
+      current_step_name: status.current_step_name || '分析失败',
+      current_step_description: errorMessage,
+      message: errorMessage
+    }, source)
+    stopPollingTaskStatus()
+    closeTaskStream()
+    streamConnectionState.value = 'closed'
+    clearTaskCache()
+    ElMessage({
+      type: 'error',
+      message: errorMessage.replace(/\n/g, '<br>'),
+      dangerouslyUseHTMLString: true,
+      duration: 10000,
+      showClose: true
+    })
+    return
+  }
+
+  if (normalizedStatus === 'running') {
+    analysisStatus.value = 'running'
+    updateProgressInfo(status)
+    consumeLiveEventPayload({ ...status, status: 'running' }, source)
+  }
+}
+
+const startTaskStream = (taskId: string) => {
+  if (!taskId || typeof window === 'undefined' || typeof EventSource === 'undefined') {
+    switchToPollingFallback('当前环境不支持实时流，已切换为轮询兜底')
+    return
+  }
+
+  const token = authStore.token || localStorage.getItem('auth-token')
+  if (!token) {
+    switchToPollingFallback('未检测到登录凭证，已切换为轮询兜底')
+    return
+  }
+
+  closeTaskStream()
+  streamMode.value = 'sse'
+  streamConnectionState.value = 'connecting'
+  lastStreamEventAt.value = Date.now()
+
+  const source = new EventSource(buildTaskStreamUrl(taskId))
+  eventSource.value = source
+
+  source.onopen = () => {
+    streamConnectionState.value = 'connected'
+    streamMode.value = 'sse'
+    lastStreamEventAt.value = Date.now()
+    stopPollingTaskStatus()
+  }
+
+  source.addEventListener('connected', (event: MessageEvent) => {
+    lastStreamEventAt.value = Date.now()
+    streamConnectionState.value = 'connected'
+    streamMode.value = 'sse'
+    stopPollingTaskStatus()
+
+    try {
+      const payload = JSON.parse(event.data)
+      pushLiveEvent({
+        type: 'system',
+        title: '实时连接已建立',
+        body: '正在持续接收分析过程更新',
+        timestamp: payload.timestamp,
+        status: 'running',
+        source: 'sse'
+      })
+    } catch (error) {
+      console.warn('解析 connected 事件失败:', error)
+    }
+  })
+
+  source.addEventListener('progress', async (event: MessageEvent) => {
+    lastStreamEventAt.value = Date.now()
+    streamConnectionState.value = 'connected'
+    streamMode.value = 'sse'
+    stopPollingTaskStatus()
+
+    try {
+      const payload = JSON.parse(event.data)
+      await handleTaskStatusUpdate(payload, 'sse')
+    } catch (error) {
+      console.error('解析 progress 事件失败:', error)
+    }
+  })
+
+  source.addEventListener('heartbeat', (event: MessageEvent) => {
+    lastStreamEventAt.value = Date.now()
+    if (streamConnectionState.value !== 'connected') {
+      streamConnectionState.value = 'connected'
+    }
+
+    try {
+      const payload = JSON.parse(event.data)
+      if (payload?.timestamp) {
+        lastStreamEventAt.value = Date.now()
+      }
+    } catch {
+      // noop
+    }
+  })
+
+  source.addEventListener('error', (event: MessageEvent) => {
+    console.warn('收到 SSE error 事件:', event)
+    switchToPollingFallback('实时流返回错误事件，已切换为轮询兜底')
+  })
+
+  source.onerror = (event) => {
+    console.warn('SSE 连接异常:', event)
+    switchToPollingFallback('实时流连接中断，已切换为轮询兜底')
+  }
+
+  startStreamWatchdog()
+}
+
+// 轮询任务状态
+const startPollingTaskStatus = (fallbackOnly = false) => {
+  if (pollingTimer.value) {
+    clearInterval(pollingTimer.value)
+  }
+
+  if (!currentTaskId.value) {
+    console.error('任务ID为空，无法开始轮询')
+    return
+  }
+
+  isPollingFallbackActive.value = fallbackOnly
+  if (fallbackOnly) {
+    streamMode.value = 'polling-fallback'
+    streamConnectionState.value = 'fallback'
+  }
+
+  pollingTimer.value = setInterval(async () => {
+    try {
+      if (!currentTaskId.value) {
+        stopPollingTaskStatus()
+        return
+      }
+
+      const response = await analysisApi.getTaskStatus(currentTaskId.value)
+      const status = response.data
+      await handleTaskStatusUpdate(status, fallbackOnly ? 'poll' : 'snapshot')
+    } catch (error) {
+      console.error('获取任务状态失败', error)
+    }
+  }, POLLING_INTERVAL_MS)
+}
+
 // 更新进度信息
 const updateProgressInfo = (status: any) => {
   console.log('🔄 更新进度信息:', status)
@@ -1135,11 +1821,8 @@ const updateProgressInfo = (status: any) => {
 
   // 如果后端提供了步骤数据，更新步骤列表
   if (status.steps && Array.isArray(status.steps)) {
-    if (analysisSteps.value.length === 0) {
-      // 首次生成步骤列表
-      analysisSteps.value = generateStepsFromBackend(status.steps)
-      console.log('📋 从后端生成步骤列表:', analysisSteps.value.length, '个步骤')
-    }
+    analysisSteps.value = generateStepsFromBackend(status.steps)
+    console.log('📋 从后端同步步骤列表:', analysisSteps.value.length, '个步骤')
   }
 
   console.log('🔄 更新后进度信息:', progressInfo.value)
@@ -1155,6 +1838,9 @@ const updateProgressInfo = (status: any) => {
 const restartAnalysis = () => {
   // 清除任务缓存
   clearTaskCache()
+  closeTaskStream()
+  stopPollingTaskStatus()
+  resetLiveMonitoringState()
 
   analysisStatus.value = 'idle'
   showResults.value = false
@@ -1170,10 +1856,6 @@ const restartAnalysis = () => {
     totalTime: 0
   }
 
-  if (pollingTimer.value) {
-    clearInterval(pollingTimer.value)
-    pollingTimer.value = null
-  }
 }
 
 
@@ -1188,10 +1870,71 @@ const getActionTagType = (action: string): 'primary' | 'success' | 'warning' | '
   return actionTypes[action] || 'info'
 }
 
+const disconnectReportSectionObserver = () => {
+  if (reportSectionObserver) {
+    reportSectionObserver.disconnect()
+    reportSectionObserver = null
+  }
+}
+
+const setReportSectionRef = (sectionId: string, element: any) => {
+  if (element) {
+    reportSectionRefs.value[sectionId] = element
+  } else {
+    delete reportSectionRefs.value[sectionId]
+  }
+}
+
+const scrollToReportSection = (sectionId: string) => {
+  activeReportTab.value = sectionId
+  reportSectionRefs.value[sectionId]?.scrollIntoView({
+    behavior: 'smooth',
+    block: 'start'
+  })
+}
+
+const initializeReportSectionObserver = async () => {
+  disconnectReportSectionObserver()
+
+  if (typeof window === 'undefined' || detailedReports.value.length === 0) {
+    return
+  }
+
+  await nextTick()
+  const sections = detailedReports.value
+    .map((report) => reportSectionRefs.value[report.sectionId])
+    .filter((section): section is HTMLElement => Boolean(section))
+
+  if (sections.length === 0) {
+    return
+  }
+
+  reportSectionObserver = new IntersectionObserver((entries) => {
+    const visibleEntries = entries
+      .filter((entry) => entry.isIntersecting)
+      .sort((a, b) => b.intersectionRatio - a.intersectionRatio)
+
+    if (visibleEntries.length === 0) {
+      return
+    }
+
+    const sectionId = visibleEntries[0].target.getAttribute('data-report-section-id')
+    if (sectionId) {
+      activeReportTab.value = sectionId
+    }
+  }, {
+    root: null,
+    rootMargin: '-18% 0px -58% 0px',
+    threshold: [0.15, 0.35, 0.6]
+  })
+
+  sections.forEach((section) => reportSectionObserver?.observe(section))
+}
+
 // 获取分析报告
 const getAnalysisReports = (data: any) => {
   console.log('📊 getAnalysisReports 输入数据:', data)
-  const reports: Array<{title: string, content: any}> = []
+  const reports: DetailedReportItem[] = []
 
   // 优先从 reports 字段获取数据（新的API格式）
   let reportsData = data
@@ -1243,8 +1986,11 @@ const getAnalysisReports = (data: any) => {
     if (content) {
       console.log(`📊 找到报告: ${mapping.key} -> ${mapping.title}`)
       reports.push({
+        key: mapping.key,
+        sectionId: `report-section-${mapping.key}`,
         title: mapping.title,
-        content: content
+        content: content,
+        category: mapping.category
       })
     }
   })
@@ -1252,8 +1998,8 @@ const getAnalysisReports = (data: any) => {
   console.log(`📊 总共找到 ${reports.length} 个报告`)
 
   // 设置第一个报告为默认激活标签页
-  if (reports.length > 0 && !activeReportTab.value) {
-    activeReportTab.value = '0'
+  if (reports.length > 0 && !reports.some((report) => report.sectionId === activeReportTab.value)) {
+    activeReportTab.value = reports[0].sectionId
   }
 
   return reports
@@ -1484,19 +2230,13 @@ const parseRecommendation = () => {
 void parseRecommendation
 
 // 一键模拟下单（应用到交易）
-onUnmounted(() => {
-  if (pollingTimer.value) {
-    clearInterval(pollingTimer.value)
-    pollingTimer.value = null
-  }
-})
 
 // 页面可见性变化时的处理
 const handleVisibilityChange = () => {
   if (document.hidden) {
-    console.log('📱 页面隐藏，暂停轮询')
+    console.log('📱 页面隐藏，保持任务监听状态')
   } else {
-    console.log('📱 页面显示，恢复轮询')
+    console.log('📱 页面显示，恢复任务监听')
     // 页面重新可见时，立即查询一次状态
     if (currentTaskId.value && analysisStatus.value === 'running') {
       setTimeout(async () => {
@@ -1504,9 +2244,10 @@ const handleVisibilityChange = () => {
           const response = await analysisApi.getTaskStatus(currentTaskId.value)
           const status = response.data // 响应拦截器已返回 response.data
           console.log('🔄 页面恢复查询状态:', status)
-          if (status.status === 'running') {
-            analysisStatus.value = 'running'
-            updateProgressInfo(status)
+          await handleTaskStatusUpdate(status, 'snapshot')
+
+          if (streamMode.value === 'polling-fallback') {
+            startTaskStream(currentTaskId.value)
           }
         } catch (error) {
           console.error('页面恢复查询状态失败:', error)
@@ -1518,6 +2259,22 @@ const handleVisibilityChange = () => {
 
 // 监听页面可见性变化
 document.addEventListener('visibilitychange', handleVisibilityChange)
+
+watch(detailedReports, async (reports) => {
+  if (reports.length === 0) {
+    activeReportTab.value = ''
+    reportSectionRefs.value = {}
+    disconnectReportSectionObserver()
+    return
+  }
+
+  reportSectionRefs.value = {}
+  if (!reports.some((report) => report.sectionId === activeReportTab.value)) {
+    activeReportTab.value = reports[0].sectionId
+  }
+
+  await initializeReportSectionObserver()
+}, { flush: 'post', immediate: true })
 
 // 获取深度描述
 const getDepthDescription = (depth: number) => {
@@ -1565,6 +2322,19 @@ const updateAnalysisSteps = (status: any) => {
     return
   }
 
+  if (status.steps && Array.isArray(status.steps) && status.steps.length === analysisSteps.value.length) {
+    analysisSteps.value = status.steps.map((step: any, index: number) => ({
+      key: analysisSteps.value[index]?.key || `step_${index}`,
+      title: step.name || analysisSteps.value[index]?.title || `步骤 ${index + 1}`,
+      description: step.description || analysisSteps.value[index]?.description || '处理中...',
+      status: normalizeStepStatus(step.status)
+    }))
+
+    const backendSummary = analysisSteps.value.map((s, i) => `${i}:${s.status}`).join(', ')
+    console.log('📋 使用后端步骤状态:', backendSummary)
+    return
+  }
+
   // 优先使用后端提供的详细步骤信息
   let currentStepIndex = 0
 
@@ -1595,7 +2365,7 @@ const updateAnalysisSteps = (status: any) => {
     if (index < currentStepIndex) {
       step.status = 'completed'
     } else if (index === currentStepIndex) {
-      step.status = 'current'
+      step.status = 'active'
     } else {
       step.status = 'pending'
     }
@@ -1711,10 +2481,11 @@ const restoreTaskFromCache = async () => {
       currentTaskId.value = cached.taskId
       analysisStatus.value = 'completed'
       showResults.value = true
-      analysisResults.value = status.result_data
+      analysisResults.value = await fetchTaskResult(cached.taskId, status.result_data)
       progressInfo.value.progress = 100
       progressInfo.value.currentStep = '分析完成'
       progressInfo.value.message = '分析已完成'
+      streamConnectionState.value = 'closed'
 
       // 恢复分析参数
       if (cached.taskData.parameters) {
@@ -1724,20 +2495,21 @@ const restoreTaskFromCache = async () => {
       console.log('✅ 任务已完成，显示结果')
       return true
 
-    } else if (status.status === 'running') {
+    } else if (status.status === 'running' || status.status === 'processing') {
       // 任务仍在运行，恢复进度显示
       currentTaskId.value = cached.taskId
       analysisStatus.value = 'running'
       showResults.value = false
+      resetLiveMonitoringState()
       updateProgressInfo(status)
+      consumeLiveEventPayload({ ...status, status: 'running' }, 'snapshot')
 
       // 恢复分析参数
       if (cached.taskData.parameters) {
         Object.assign(analysisForm, cached.taskData.parameters)
       }
 
-      // 启动轮询
-      startPollingTaskStatus()
+      startTaskStream(cached.taskId)
 
       console.log('🔄 任务仍在运行，恢复进度显示')
       return true
@@ -1905,7 +2677,6 @@ const applyRecommendedModels = () => {
 }
 
 // 监听分析深度变化
-import { watch } from 'vue'
 watch(() => analysisForm.researchDepth, () => {
   checkModelSuitability()
 })
@@ -1971,6 +2742,13 @@ onMounted(async () => {
 
   // 🆕 初始检查模型适用性
   await checkModelSuitability()
+})
+
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  closeTaskStream()
+  stopPollingTaskStatus()
+  disconnectReportSectionObserver()
 })
 </script>
 
@@ -2435,6 +3213,7 @@ onMounted(async () => {
     }
   }
 
+  &.step-active,
   &.step-current {
     border-left-color: #3b82f6;
     background: linear-gradient(90deg, rgba(59, 130, 246, 0.05) 0%, transparent 100%);
@@ -2453,6 +3232,26 @@ onMounted(async () => {
     .step-description {
       color: #1d4ed8;
       font-weight: 500;
+    }
+  }
+
+  &.step-failed {
+    border-left-color: #ef4444;
+    background: linear-gradient(90deg, rgba(239, 68, 68, 0.06) 0%, transparent 100%);
+
+    .step-icon {
+      background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+      color: white;
+      box-shadow: 0 2px 12px rgba(239, 68, 68, 0.25);
+    }
+
+    .step-title {
+      color: #dc2626;
+      font-weight: 700;
+    }
+
+    .step-description {
+      color: #b91c1c;
     }
   }
 
@@ -2498,6 +3297,23 @@ onMounted(async () => {
 
 .pending-icon {
   color: #9ca3af;
+}
+
+.failed-icon {
+  color: white;
+}
+
+.pending-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #cbd5e1;
+}
+
+@media (max-width: 1200px) {
+  .progress-workspace {
+    grid-template-columns: 1fr;
+  }
 }
 
 .step-content {
@@ -2649,6 +3465,24 @@ onMounted(async () => {
   color: var(--el-text-color-primary);
 }
 
+.progress-overview {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.progress-connection {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.connection-mode {
+  font-size: 13px;
+  color: #64748b;
+}
+
 /* 进度条区域 */
 .progress-bar-section {
   margin-bottom: 24px;
@@ -2701,6 +3535,27 @@ onMounted(async () => {
   line-height: 1.5;
 }
 
+.progress-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  gap: 20px;
+}
+
+.progress-panel {
+  border: 1px solid var(--el-border-color);
+  border-radius: 12px;
+  background: var(--el-bg-color);
+  min-height: 280px;
+  padding: 18px;
+}
+
+.panel-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1f2937;
+  margin-bottom: 16px;
+}
+
 /* 分析步骤 */
 .analysis-steps {
   background: var(--el-bg-color);
@@ -2717,8 +3572,67 @@ onMounted(async () => {
 }
 
 .steps-container {
-  max-height: 300px;
+  max-height: 360px;
   overflow-y: auto;
+}
+
+.empty-progress-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 220px;
+  padding: 24px;
+  text-align: center;
+  color: #94a3b8;
+  background: #f8fafc;
+  border-radius: 10px;
+}
+
+.live-events {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.live-event {
+  padding: 14px 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.live-event-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.live-event-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.live-event-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.live-event-time {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.live-event-body {
+  font-size: 13px;
+  color: #475569;
+  white-space: pre-wrap;
+  line-height: 1.6;
 }
 
 /* 结果显示样式 */
@@ -2916,86 +3830,119 @@ onMounted(async () => {
   margin-top: 16px;
 }
 
-.analysis-tabs {
-  /* 标签页头部样式 */
-  :deep(.el-tabs__header) {
-    margin: 0 0 20px 0;
-    background: var(--el-fill-color-light);
-    padding: 12px;
-    border-radius: 15px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-    border: 1px solid var(--el-border-color);
+.analysis-reading-layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.reports-sidebar {
+  position: sticky;
+  top: 88px;
+}
+
+.reports-sidebar-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: calc(100vh - 120px);
+  overflow: auto;
+  padding: 16px;
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color);
+  border-radius: 16px;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.08);
+}
+
+.reports-sidebar-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #475569;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.report-nav-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: #334155;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.report-nav-item:hover {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.18);
+}
+
+.report-nav-item.is-active {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(59, 130, 246, 0.16));
+  border-color: rgba(99, 102, 241, 0.24);
+  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.1);
+}
+
+.report-nav-icon {
+  flex: 0 0 20px;
+  font-size: 18px;
+  line-height: 1.4;
+}
+
+.report-nav-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.report-nav-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.report-nav-desc {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #64748b;
+}
+
+.reports-reader {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.report-section-card {
+  scroll-margin-top: 92px;
+  padding: 24px;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color);
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+}
+
+@media (max-width: 1080px) {
+  .analysis-reading-layout {
+    grid-template-columns: 1fr;
   }
 
-  /* 标签页导航 */
-  :deep(.el-tabs__nav-wrap) {
-    &::after {
-      display: none; /* 隐藏默认的底部边框 */
-    }
+  .reports-sidebar {
+    position: static;
   }
 
-  /* 单个标签页样式 */
-  :deep(.el-tabs__item) {
-    height: 55px !important;
-    line-height: 55px !important;
-    padding: 0 20px !important;
-    margin-right: 8px !important;
-    background: var(--el-bg-color) !important;
-    border: 2px solid var(--el-border-color) !important;
-    border-radius: 12px !important;
-    color: var(--el-text-color-regular) !important;
-    font-weight: 600 !important;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1) !important;
-    position: relative !important;
-    overflow: hidden !important;
-    border-bottom: 2px solid var(--el-border-color) !important; /* 确保底部边框存在 */
-
-    &:hover {
-      background: var(--el-fill-color-light) !important;
-      border-color: #2196f3 !important;
-      transform: translateY(-2px) scale(1.02) !important;
-      box-shadow: 0 4px 15px rgba(33,150,243,0.3) !important;
-      color: #1976d2 !important;
-    }
-
-    &.is-active {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
-      color: white !important;
-      border-color: #667eea !important;
-      box-shadow: 0 6px 20px rgba(102,126,234,0.4) !important;
-      transform: translateY(-3px) scale(1.05) !important;
-
-      &::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: linear-gradient(135deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0.1) 100%);
-        border-radius: 10px;
-        pointer-events: none;
-      }
-    }
-  }
-
-  /* 标签页内容区域 */
-  :deep(.el-tabs__content) {
-    padding: 0;
-  }
-
-  :deep(.el-tab-pane) {
-    padding: 25px;
-    background: var(--el-bg-color);
-    border-radius: 15px;
-    border: 1px solid var(--el-border-color);
-    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-    margin-top: 10px;
+  .reports-sidebar-inner {
+    max-height: none;
   }
 }
 
-/* 报告头部样式 */
 .report-header {
   margin-bottom: 25px;
   padding: 20px;

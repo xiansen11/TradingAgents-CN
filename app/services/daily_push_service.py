@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -27,6 +28,7 @@ from app.services.simple_analysis_service import get_simple_analysis_service
 logger = logging.getLogger("webapi")
 
 ACTIVE_STATUSES = {"queued", "generating", "waiting_to_push", "sending"}
+BLOCKING_STATUSES = {"queued", "generating", "sending"}
 TERMINAL_STATUSES = {"sent", "failed"}
 DEFAULT_TIMEZONE = "Asia/Shanghai"
 
@@ -493,28 +495,110 @@ class DailyPushService:
         recommendation = report.get("recommendation") or "暂无"
         risk_level = report.get("risk_level") or "未知"
         confidence = report.get("confidence_score")
+        decision = report.get("decision") if isinstance(report.get("decision"), dict) else {}
+        reports = report.get("reports") if isinstance(report.get("reports"), dict) else {}
         summary = (report.get("summary") or "报告已生成，请在系统中查看完整内容。").strip()
-        key_points = report.get("key_points") or []
-        point_lines = "\n".join(f"- {item}" for item in key_points[:6] if item)
+        action = decision.get("action") or recommendation
+        target_price = decision.get("target_price")
+        reasoning = decision.get("reasoning") or recommendation
+        detail_source = reports.get("trader_investment_plan") or reports.get("investment_plan") or ""
+        research_source = reports.get("research_team_decision") or reports.get("bull_researcher") or summary
+        risk_source = reports.get("risk_management_decision") or reports.get("bear_researcher") or summary
+
+        key_points = [str(item).strip() for item in (report.get("key_points") or []) if str(item).strip()]
+        if not key_points:
+            key_points = self._extract_card_points([reasoning, detail_source, summary], limit=3)
+        risk_points = self._extract_card_points([risk_source, summary], limit=2)
+        summary_excerpt = self._truncate_text(summary, 420)
         report_url = f"/reports/view/{str(report.get('_id'))}"
         confidence_text = f"{confidence:.2f}" if isinstance(confidence, (int, float)) else "暂无"
+        target_price_text = f"{target_price:.2f}" if isinstance(target_price, (int, float)) else None
 
-        markdown = (
-            f"**股票**：{stock_name}({stock_symbol})\n"
-            f"**分析日期**：{analysis_date}\n"
-            f"**投资建议**：{recommendation}\n"
-            f"**信心分**：{confidence_text}\n"
-            f"**风险等级**：{risk_level}\n\n"
-            f"**核心要点**\n{point_lines or '- 暂无'}\n\n"
-            f"**摘要**\n{summary[:1800]}\n\n"
-            f"完整报告：{report_url}"
+        sections = [
+            f"**股票**：{stock_name}({stock_symbol})",
+            f"**分析日期**：{analysis_date}",
+            f"**操作建议**：{action}",
+        ]
+        if target_price_text:
+            sections.append(f"**目标价**：{target_price_text}")
+        sections.extend(
+            [
+                f"**信心分**：{confidence_text}",
+                f"**风险等级**：{risk_level}",
+                "",
+                "**关键理由**",
+                "\n".join(f"- {item}" for item in key_points[:3]) or "- 暂无",
+                "",
+                "**风险提示**",
+                "\n".join(f"- {item}" for item in risk_points[:2]) or "- 暂无",
+                "",
+                "**报告摘要**",
+                summary_excerpt,
+                "",
+                f"完整报告：{report_url}",
+            ]
         )
+        markdown = "\n".join(sections)
         template = "green" if str(recommendation).lower() in {"buy", "strong_buy", "买入"} else "blue"
         return build_simple_card(
             title=f"{stock_name}({stock_symbol}) 每日股票报告",
             markdown=markdown,
             template=template,
         )
+
+    def _extract_card_points(self, texts: List[str], limit: int) -> List[str]:
+        points: List[str] = []
+        seen = set()
+        for text in texts:
+            for candidate in self._iter_point_candidates(text):
+                normalized = candidate.strip()
+                if len(normalized) < 12:
+                    continue
+                if normalized in seen:
+                    continue
+                seen.add(normalized)
+                points.append(self._truncate_text(normalized, 90))
+                if len(points) >= limit:
+                    return points
+        return points
+
+    def _iter_point_candidates(self, text: Any) -> List[str]:
+        raw = str(text or "").strip()
+        if not raw:
+            return []
+
+        cleaned = (
+            raw.replace("**", "")
+            .replace("###", "")
+            .replace("##", "")
+            .replace("#", "")
+            .replace("Bull Analyst:", "")
+            .replace("Bear Analyst:", "")
+            .replace("Safe Analyst:", "")
+            .replace("Risky Analyst:", "")
+            .replace("Neutral Analyst:", "")
+        )
+        candidates: List[str] = []
+        for line in cleaned.splitlines():
+            value = line.strip()
+            if not value:
+                continue
+            value = re.sub(r"^[-*•\d\.\)\s]+", "", value).strip()
+            value = re.sub(r"^[一二三四五六七八九十]+[、.]\s*", "", value)
+            if any(token in value for token in ("关键观点", "辩论总结", "详细推理", "投资建议", "分析日期")):
+                continue
+            candidates.append(value)
+
+        if not candidates:
+            chunks = re.split(r"[。！？；\n]+", cleaned)
+            candidates = [chunk.strip() for chunk in chunks if chunk.strip()]
+        return candidates
+
+    def _truncate_text(self, text: str, limit: int) -> str:
+        value = str(text or "").strip()
+        if len(value) <= limit:
+            return value
+        return value[: limit - 1].rstrip() + "…"
 
     async def _get_subscription_or_raise(
         self,
@@ -532,17 +616,27 @@ class DailyPushService:
         return doc
 
     async def _ensure_no_active_run(self, subscription_id: str, stock_symbol: str) -> None:
-        active = await self._find_active_run(subscription_id, stock_symbol)
+        active = await self._find_active_run(
+            subscription_id,
+            stock_symbol,
+            statuses=BLOCKING_STATUSES,
+        )
         if active:
             raise ValueError(f"{stock_symbol} already has an active daily push run")
 
-    async def _find_active_run(self, subscription_id: str, stock_symbol: str) -> Optional[Dict[str, Any]]:
+    async def _find_active_run(
+        self,
+        subscription_id: str,
+        stock_symbol: str,
+        statuses: Optional[set[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
         db = get_mongo_db()
+        status_set = statuses or ACTIVE_STATUSES
         return await db.daily_push_runs.find_one(
             {
                 "subscription_id": subscription_id,
                 "stock_symbol": stock_symbol,
-                "status": {"$in": list(ACTIVE_STATUSES)},
+                "status": {"$in": list(status_set)},
             }
         )
 
