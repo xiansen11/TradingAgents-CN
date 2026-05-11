@@ -118,6 +118,29 @@ const routes: RouteRecordRaw[] = [
     ]
   },
   {
+    path: '/tools',
+    name: 'Tools',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    redirect: '/tools/external-test',
+    meta: {
+      title: '工具测试',
+      icon: 'Operation',
+      requiresAuth: true,
+      transition: 'fade'
+    },
+    children: [
+      {
+        path: 'external-test',
+        name: 'ExternalToolTest',
+        component: () => import('@/views/Tools/ExternalToolTest.vue'),
+        meta: {
+          title: '外部工具测试',
+          requiresAuth: true
+        }
+      }
+    ]
+  },
+  {
     path: '/settings',
     name: 'Settings',
     component: () => import('@/layouts/BasicLayout.vue'),

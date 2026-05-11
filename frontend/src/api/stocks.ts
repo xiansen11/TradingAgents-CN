@@ -94,7 +94,7 @@ export const stocksApi = {
    * @param symbol 6位股票代码
    */
   async getFundamentals(symbol: string) {
-    return ApiClient.get<FundamentalsResponse>(`/api/stocks/${symbol}/fundamentals`)
+    return ApiClient.get<FundamentalsResponse>(`/api/stocks/${symbol}/basic`)
   },
 
   /**
@@ -119,4 +119,3 @@ export const stocksApi = {
     return ApiClient.get<NewsResponse>(`/api/stocks/${symbol}/news`, { days, limit, include_announcements: includeAnnouncements })
   }
 }
-

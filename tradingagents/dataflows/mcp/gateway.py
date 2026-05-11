@@ -192,20 +192,26 @@ class MCPDataGateway:
         if not self._mcp_package_available():
             return MCPCallResult("", "", params, error="Python package 'mcp' is not installed")
 
-        last_error = None
+        route_errors: List[str] = []
         for route in self.CAPABILITY_ROUTES[capability]:
             server_config = self._server_configs.get(route.server)
             if server_config is None:
-                last_error = f"MCP server is not configured: {route.server}"
+                route_errors.append(f"{route.server}.{route.tool}: MCP server is not configured")
                 continue
 
             arguments = self._build_arguments(route, params)
             result = await self._call_route(server_config, route.tool, arguments)
             if result.ok:
                 return result
-            last_error = result.error
+            route_errors.append(
+                f"{route.server}.{route.tool}: {result.error or 'returned empty result'}"
+            )
 
-        return MCPCallResult("", "", params, error=last_error or f"No usable MCP route for {capability}")
+        detail = "; ".join(route_errors)
+        message = f"No usable MCP route for {capability}"
+        if detail:
+            message = f"{message}: {detail}"
+        return MCPCallResult("", "", params, error=message)
 
     async def _call_route(self, server_config: MCPServerConfig, tool_name: str, arguments: Dict[str, Any]) -> MCPCallResult:
         start = time.perf_counter()

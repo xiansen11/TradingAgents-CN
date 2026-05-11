@@ -26,6 +26,11 @@
       <template #title>每日推送</template>
     </el-menu-item>
 
+    <el-menu-item index="/tools/external-test">
+      <el-icon><Operation /></el-icon>
+      <template #title>工具测试</template>
+    </el-menu-item>
+
     <el-sub-menu index="/settings-config">
       <template #title>
         <el-icon><Setting /></el-icon>
@@ -65,6 +70,7 @@ import {
   InfoFilled,
   Monitor,
   Odometer,
+  Operation,
   Setting,
   TrendCharts
 } from '@element-plus/icons-vue'
